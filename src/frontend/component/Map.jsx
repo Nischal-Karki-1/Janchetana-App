@@ -4,7 +4,7 @@ import MapView, { Marker, Geojson } from "react-native-maps";
 import * as turf from "@turf/turf";
 import districtsData from "./DistrictsData";
 
-const pin = require('../assets/pin.png');
+const pin = require("../assets/pin.png");
 
 export default function Map({ navigation }) {
     const [provinceData, setProvinceData] = useState(null);
@@ -16,6 +16,32 @@ export default function Map({ navigation }) {
     const [showMarkers, setShowMarkers] = useState(true);
     const mapRef = useRef(null);
 
+    const provinceColors = [
+       "rgba(0, 191, 255, 0.3)",   // Deep Sky Blue
+        "rgba(50, 205, 50, 0.3)",   // Lime Green
+        "rgba(0, 0, 255, 0.3)",    // Blue
+        "rgba(255, 165, 0, 0.3)",  // Orange
+        "rgba(75, 0, 130, 0.3)",   // Indigo
+        "rgba(255, 20, 147, 0.3)", // Pink
+        "rgba(0, 128, 128, 0.3)",  // Teal
+    ];
+    const getProvinceColor = (provinceId) => {
+
+        const index = (provinceId - 1) % provinceColors.length;
+        return provinceColors[index];
+    };
+
+    const getDistrictColor = (provinceId, districtIndex, totalDistricts) => {
+        const baseColor = getProvinceColor(provinceId); 
+        const opacityStep = 0.5 / totalDistricts;
+
+ 
+        const [r, g, b] = baseColor.match(/\d+/g).map(Number);
+        const adjustedOpacity = 0.1 + opacityStep * districtIndex;
+
+        return `rgba(${r}, ${g}, ${b}, ${adjustedOpacity})`; 
+    };
+
     useEffect(() => {
         // Fetch province data
         fetch(
@@ -24,7 +50,6 @@ export default function Map({ navigation }) {
             .then((response) => response.json())
             .then((data) => {
                 setProvinceData(data);
-
 
                 setTimeout(() => {
                     const nepalRegion = {
@@ -39,7 +64,7 @@ export default function Map({ navigation }) {
                     }
                 }, 1500);
 
-                // Set province markers to display names at the center of each province
+                // Set province markers
                 const provinceMarkers = data.features.map((feature) => {
                     const provinceName = feature.properties.name;
                     const coordinates = feature.geometry.coordinates;
@@ -99,6 +124,7 @@ export default function Map({ navigation }) {
                             console.error(`Unknown geometry type for district: ${districtName}`);
                             return null;
                         }
+
                         const latitudes = allCoordinates.map((coord) => coord[1]);
                         const longitudes = allCoordinates.map((coord) => coord[0]);
 
@@ -125,7 +151,7 @@ export default function Map({ navigation }) {
                             provinceCode: feature.properties.PROVINCE,
                         };
                     })
-                    .filter(Boolean); // Filter out any null markers
+                    .filter(Boolean);
 
                 setMarkers(newMarkers);
             })
@@ -139,14 +165,37 @@ export default function Map({ navigation }) {
         const point = turf.point([coordinate.longitude, coordinate.latitude]);
         console.log("Tapped Coordinate:", coordinate);
 
+
+        if (selectedProvince) {
+            if (districtData) {
+                const districtFeature = districtData.features.find((feature) => {
+                    const polygon = turf.polygon(feature.geometry.coordinates);
+                    return (
+                        turf.booleanPointInPolygon(point, polygon) &&
+                        feature.properties.PROVINCE === selectedProvince.properties.id
+                    );
+                });
+
+                if (districtFeature) {
+                    console.log("Tapped inside district:", districtFeature.properties.DISTRICT);
+                    const districtMarker = markers.find(
+                        (marker) =>
+                            marker.name.trim().toLowerCase() ===
+                            districtFeature.properties.DISTRICT.trim().toLowerCase()
+                    );
+
+                    if (districtMarker) {
+                        navigation.navigate("DistrictDetails", { district: districtMarker });
+                    }
+                    return;
+                }
+            }
+        }
+
         if (provinceData) {
             const provinceFeature = provinceData.features.find((feature) => {
                 const polygon = turf.multiPolygon(feature.geometry.coordinates);
-                const isInside = turf.booleanPointInPolygon(point, polygon);
-                console.log(
-                    `Checking province: ${feature.properties.name}, Inside: ${isInside}`
-                );
-                return isInside;
+                return turf.booleanPointInPolygon(point, polygon);
             });
 
             if (provinceFeature) {
@@ -158,13 +207,14 @@ export default function Map({ navigation }) {
         }
     };
 
+
     const handleMarkerPress = (marker) => {
-        navigation.navigate('DistrictDetails', { district: marker });
+        navigation.navigate("DistrictDetails", { district: marker });
     };
 
     const handleProvinceClick = (provinceFeature) => {
         setSelectedProvince(provinceFeature);
-        setClickedProvinceId(provinceFeature.properties.id); // Store clicked province id
+        setClickedProvinceId(provinceFeature.properties.id);
         const allCoordinates = provinceFeature.geometry.coordinates.flat(2);
         const latitudes = allCoordinates.map((coord) => coord[1]);
         const longitudes = allCoordinates.map((coord) => coord[0]);
@@ -214,33 +264,43 @@ export default function Map({ navigation }) {
             onPress={handleMapPress}
             onRegionChange={handleRegionChange}
         >
-            {/* Render provinces */}
-            {provinceData && (
-                <Geojson
-                    geojson={provinceData}
-                    fillColor="rgba(0,0,255,0.3)"
-                    strokeColor="blue"
-                />
-            )}
+            {provinceData &&
+                provinceData.features.map((feature, index) => (
+                    <Geojson
+                        key={index}
+                        geojson={{
+                            type: "FeatureCollection",
+                            features: [feature],
+                        }}
+                        fillColor={getProvinceColor(feature.properties.id)}
+                        strokeColor="black" 
+                        strokeWidth={1.2} 
+                    />
+                ))}
 
-            {/* Render districts when a province is selected */}
             {districtData && selectedProvince && (
-                <Geojson
-                    geojson={{
-                        ...districtData,
-                        features: districtData.features.filter(
-                            (feature) =>
-                                feature.properties.PROVINCE === selectedProvince.properties.id
-                        ),
-                    }}
-                    fillColor="rgba(0,255,0,0.3)"
-                    strokeColor="green"
-                />
+                districtData.features
+                    .filter((feature) => feature.properties.PROVINCE === selectedProvince.properties.id)
+                    .map((feature, index) => (
+                        <Geojson
+                            key={index}
+                            geojson={{
+                                type: "FeatureCollection",
+                                features: [feature],
+                            }}
+                            fillColor={getDistrictColor(
+                                selectedProvince.properties.id,
+                                index,
+                                districtData.features.length
+                            )} // Dynamic color based on province and district index
+                            strokeColor="black" // Keep consistent borders
+                            strokeWidth={1} // Optional: adjust stroke width
+                        />
+                    ))
             )}
-
 
             {provinceMarkers
-                .filter(marker => marker.provinceCode !== clickedProvinceId)
+                .filter((marker) => marker.provinceCode !== clickedProvinceId)
                 .map((marker, index) => (
                     <Marker
                         key={index}
@@ -249,11 +309,8 @@ export default function Map({ navigation }) {
                             longitude: marker.longitude,
                         }}
                         title={marker.name}
-                    >
-
-                    </Marker>
+                    />
                 ))}
-
 
             {showMarkers &&
                 filteredMarkers.map((marker, index) => (
@@ -264,49 +321,48 @@ export default function Map({ navigation }) {
                             longitude: marker.longitude + 0.095,
                         }}
                         onPress={() => handleMarkerPress(marker)}
-
                     >
-                        <View style={{ alignItems: 'center', flexDirection:'row' }}>
+                        <View style={{ alignItems: "center", flexDirection: "row" }}>
                             <Image
                                 source={pin}
                                 style={styles.pinImage}
                                 resizeMode="contain"
                             />
-                            <View style={styles.markerLabel}>
-                                <Text style={{ fontWeight: 'bold', color: 'white' }}>{marker.name}</Text>
-                            </View>
+
+                            <Text style={{ fontWeight: 'bold', color: 'white' }}>{marker.name}</Text>
+
                         </View>
                     </Marker>
                 ))}
         </MapView>
     );
 }
-const customMapStyle = [
-    {
-        elementType: "labels",
-        stylers: [{ visibility: "off" }],
-    },
-    {
-        featureType: "administrative",
-        stylers: [{ visibility: "off" }],
-    },
-    {
-        featureType: "road",
-        stylers: [{ visibility: "off" }],
-    },
-];
 
 const styles = StyleSheet.create({
     map: {
         flex: 1,
     },
-    markerLabel: {
-        paddingTop: 10,
-     
-
-    },
     pinImage: {
-        width: 40,
-        height: 40, 
+        width: 35,
+        height: 35,
+    },
+
+    markerText: {
+        fontWeight: "bold",
+        fontSize: 12,
     },
 });
+
+const customMapStyle = [
+    {
+        featureType: "all",
+        elementType: "labels",
+        stylers: [{ visibility: "off" }],
+    },
+    {
+        featureType: "all",
+        elementType: "geometry",
+        stylers: [{ visibility: "off" }],
+    }
+
+];
